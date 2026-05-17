@@ -8,6 +8,7 @@ class VideoInfo(BaseModel):
     cover_url: str | None = None
     duration: int | None = None
     platform: str  # "douyin" or "bilibili"
+    video_url: str
 
 class ParseResponse(BaseModel):
     success: bool
