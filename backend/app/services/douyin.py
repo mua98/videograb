@@ -1,6 +1,5 @@
 import httpx
 import re
-import json
 from typing import Optional
 
 class DouyinParser:
@@ -16,12 +15,16 @@ class DouyinParser:
         if not video_info:
             raise ValueError("无法解析抖音视频链接")
 
+        video_url = video_info.get("video_url")
+        if not video_url:
+            raise ValueError("无法获取视频链接，请检查链接是否有效")
+
         return {
             "title": video_info.get("title", "抖音视频"),
             "cover_url": video_info.get("cover_url"),
             "duration": video_info.get("duration"),
             "platform": "douyin",
-            "video_url": video_info.get("video_url")
+            "video_url": video_url
         }
 
     async def _fetch_video_info(self, share_url: str) -> Optional[dict]:
@@ -35,41 +38,14 @@ class DouyinParser:
         ) as client:
             response = await client.get(share_url)
             real_url = str(response.url)
-            html = response.text
 
-            # 尝试从 HTML 中提取 RENDER_DATA
-            video_info = self._parse_render_data(html)
-            if video_info:
-                return video_info
-
-            # 尝试从 URL 中提取视频 ID 并构建 API 请求
+            # 从 URL 中提取视频 ID
             video_id = self._extract_video_id(real_url)
-            if video_id:
-                return await self._fetch_via_api(client, video_id)
+            if not video_id:
+                return None
 
-            return None
-
-    def _parse_render_data(self, html: str) -> Optional[dict]:
-        """从 HTML 中提取 RENDER_DATA JSON"""
-        # 抖音使用 RENDER_DATA 或 __RENDER_DATA__ 存储视频信息
-        patterns = [
-            r'<script id="__RENDER_DATA__" type="application/json">([^<]+)</script>',
-            r'"desc":"([^"]+)"',
-            r'"playAddr":"([^"]+)"',
-            r'"downloadAddr":"([^"]+)"',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, html)
-            if match:
-                try:
-                    if "desc" in pattern:
-                        # 简单提取标题
-                        title = match.group(1)
-                        return {"title": title, "video_url": None, "cover_url": None, "duration": None}
-                except:
-                    continue
-        return None
+            # 通过 API 获取视频信息
+            return await self._fetch_via_api(client, video_id, real_url)
 
     def _extract_video_id(self, url: str) -> Optional[str]:
         """从 URL 中提取视频 ID"""
@@ -83,36 +59,68 @@ class DouyinParser:
                 return match.group(1) if len(match.groups()) == 1 else match.group(0)
         return None
 
-    async def _fetch_via_api(self, client: httpx.AsyncClient, video_id: str) -> Optional[dict]:
+    async def _fetch_via_api(self, client: httpx.AsyncClient, video_id: str, original_url: str) -> Optional[dict]:
         """通过视频 ID 获取视频信息"""
-        # 抖音有 API 可以获取视频信息
-        api_url = f"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id={video_id}"
+        # 尝试多个 API 端点
+        api_endpoints = [
+            f"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id={video_id}",
+            f"https://www.iesdouyin.com/share/video/{video_id}/",
+        ]
 
+        for api_url in api_endpoints:
+            try:
+                response = await client.get(api_url, follow_redirects=True)
+                html = response.text
+
+                # 从 HTML 中提取视频信息
+                video_info = self._extract_from_html(html)
+                if video_info and video_info.get("video_url"):
+                    return video_info
+            except Exception:
+                continue
+
+        # 最后尝试直接解析页面
         try:
-            response = await client.get(api_url)
-            data = response.json()
-
-            if data.get("aweme_detail"):
-                aweme = data["aweme_detail"]
-                video_data = aweme.get("video", {})
-
-                # 获取无水印视频链接
-                video_url = None
-                download_addr = video_data.get("download_addr", {})
-                if download_addr:
-                    video_url = download_addr.get("url_list", [None])[0]
-
-                if not video_url:
-                    play_addr = video_data.get("play_addr", {})
-                    video_url = play_addr.get("url_list", [None])[0]
-
-                return {
-                    "title": aweme.get("desc", "抖音视频"),
-                    "cover_url": video_data.get("cover", {}).get("url_list", [None])[0],
-                    "duration": video_data.get("duration"),
-                    "video_url": video_url
-                }
+            response = await client.get(original_url)
+            return self._extract_from_html(response.text)
         except Exception:
             pass
 
         return None
+
+    def _extract_from_html(self, html: str) -> Optional[dict]:
+        """从 HTML 中提取视频信息"""
+        result = {}
+
+        # 提取标题
+        title_match = re.search(r'"desc":"([^"]+)"', html)
+        if title_match:
+            result["title"] = title_match.group(1)
+        else:
+            result["title"] = "抖音视频"
+
+        # 提取无水印视频链接
+        video_url = None
+
+        # 尝试 playAddr (有水印但更稳定)
+        play_match = re.search(r'"playAddr":"([^"]+)"', html)
+        if play_match:
+            video_url = play_match.group(1).replace("\\u002F", "/")
+
+        # 尝试 downloadAddr (无水印)
+        if not video_url:
+            download_match = re.search(r'"downloadAddr":"([^"]+)"', html)
+            if download_match:
+                video_url = download_match.group(1).replace("\\u002F", "/")
+
+        # 尝试 playwm 替换为 play
+        if not video_url:
+            playwm_match = re.search(r'playwm\?url=([^&"]+)', html)
+            if playwm_match:
+                video_url = playwm_match.group(1)
+
+        result["video_url"] = video_url
+        result["cover_url"] = None
+        result["duration"] = None
+
+        return result if video_url else None
