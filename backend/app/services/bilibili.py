@@ -13,8 +13,11 @@ class BilibiliParser:
         1. 处理短链接 b23.tv 或 av/BV 号
         2. 调用B站官方API获取视频信息
         """
+        # 从分享文本中提取实际 URL
+        url = self._extract_url(share_url)
+
         # 如果是短链接，先解析真实URL
-        video_id = await self._extract_video_id(share_url)
+        video_id = await self._extract_video_id(url)
         if not video_id:
             raise ValueError("无法解析B站视频链接")
 
@@ -27,6 +30,21 @@ class BilibiliParser:
             "platform": "bilibili",
             "video_url": info.get("video_url")
         }
+
+    def _extract_url(self, text: str) -> str:
+        """从分享文本中提取 URL"""
+        # 匹配 b23.tv 短链接或标准 URL
+        patterns = [
+            r'https?://b23\.tv/[a-zA-Z0-9]+',
+            r'https?://[a-zA-Z0-9.-]+\.bilibili\.com/[^\s]+',
+            r'av\d+|BV[a-zA-Z0-9]+',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(0)
+        return text
 
     async def _extract_video_id(self, url: str) -> Optional[str]:
         """从URL中提取视频ID"""
