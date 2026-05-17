@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
+from urllib.parse import urlparse, unquote
 from app.models.schemas import ParseRequest, ParseResponse, VideoInfo
 from app.services.douyin import DouyinParser
 from app.services.bilibili import BilibiliParser
@@ -46,11 +47,26 @@ async def download_video(url: str = Query(..., description="视频直链URL")):
     流式转发视频到用户浏览器
     不占用服务器存储空间
     """
+    def get_referer_for_url(video_url: str) -> str:
+        parsed = urlparse(video_url)
+        return f"{parsed.scheme}://{parsed.netloc}/"
+
     try:
+        referer = get_referer_for_url(url)
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://www.douyin.com/",
+            "Referer": referer,
         }
+
+        # First make a HEAD request to get content-type for proper response header
+        head_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": referer,
+        }
+        async with httpx.AsyncClient(follow_redirects=True, timeout=300.0) as client:
+            head_response = await client.head(url, headers=head_headers)
+            head_response.raise_for_status()
+            content_type = head_response.headers.get("content-type", "video/mp4")
 
         async def stream_content():
             async with httpx.AsyncClient(follow_redirects=True, timeout=300.0) as client:
@@ -59,11 +75,17 @@ async def download_video(url: str = Query(..., description="视频直链URL")):
                     async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
                         yield chunk
 
+        parsed = urlparse(url)
+        path = unquote(parsed.path)
+        filename = path.split("/")[-1] if path else "video.mp4"
+        if not filename or "." not in filename:
+            filename = "video.mp4"
+
         return StreamingResponse(
             stream_content(),
-            media_type="video/mp4",
+            media_type=content_type,
             headers={
-                "Content-Disposition": "attachment; filename=video.mp4",
+                "Content-Disposition": f"attachment; filename={filename}",
                 "Accept-Ranges": "bytes",
             }
         )
