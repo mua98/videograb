@@ -56,9 +56,25 @@ class BilibiliParser:
                 raise ValueError(f"B站API返回错误: {data.get('message')}")
 
             video_data = data["data"]
-            return {
-                "title": video_data["title"],
-                "pic": video_data["pic"],
-                "duration": video_data["duration"],
-                "video_url": video_data["videourl"]
-            }
+
+        # 优先从 dash 获取无水印视频URL
+        video_url = None
+        if "dash" in video_data and video_data["dash"]:
+            dash = video_data["dash"]
+            # 获取最高质量的视频流
+            if "video" in dash and dash["video"]:
+                video_url = dash["video"][0].get("baseUrl") or dash["video"][0].get("url")
+
+        # fallback 到 durl
+        if not video_url and "durl" in video_data:
+            video_url = video_data["durl"][0]["url"]
+
+        if not video_url:
+            raise ValueError("无法获取B站视频URL")
+
+        return {
+            "title": video_data["title"],
+            "pic": video_data["pic"],
+            "duration": video_data["duration"],
+            "video_url": video_url
+        }
