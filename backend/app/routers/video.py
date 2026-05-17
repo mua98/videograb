@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
+import httpx
 from app.models.schemas import ParseRequest, ParseResponse, VideoInfo
 from app.services.douyin import DouyinParser
 from app.services.bilibili import BilibiliParser
@@ -37,3 +39,34 @@ async def parse_video(request: ParseRequest):
             success=False,
             error=str(e)
         )
+
+@router.get("/download")
+async def download_video(url: str = Query(..., description="视频直链URL")):
+    """
+    流式转发视频到用户浏览器
+    不占用服务器存储空间
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://www.douyin.com/",
+        }
+
+        async def stream_content():
+            async with httpx.AsyncClient(follow_redirects=True, timeout=300.0) as client:
+                async with client.stream("GET", url, headers=headers) as response:
+                    response.raise_for_status()
+                    async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
+                        yield chunk
+
+        return StreamingResponse(
+            stream_content(),
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": "attachment; filename=video.mp4",
+                "Accept-Ranges": "bytes",
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"下载失败: {str(e)}")
