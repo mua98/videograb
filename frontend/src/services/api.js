@@ -5,6 +5,14 @@ const api = axios.create({
   timeout: 60000,
 })
 
+api.interceptors.response.use(
+  response => response,
+  error => {
+    console.error('API Error:', error)
+    return Promise.reject(error)
+  }
+)
+
 export const parseVideo = (url) => api.post('/parse', { url })
 
-export const downloadVideo = (videoUrl) => `/api/v1/download?url=${encodeURIComponent(videoUrl)}`
+export const buildDownloadUrl = (videoUrl) => `/api/v1/download?url=${encodeURIComponent(videoUrl)}`

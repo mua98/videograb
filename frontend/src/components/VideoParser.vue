@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { parseVideo, downloadVideo } from '../services/api'
+import { parseVideo, buildDownloadUrl } from '../services/api'
 
 const videoUrl = ref('')
 const loading = ref(false)
@@ -33,7 +33,7 @@ const handleParse = async () => {
 
 const handleDownload = () => {
   if (!result.value?.video_url) return
-  const url = downloadVideo(result.value.video_url)
+  const url = buildDownloadUrl(result.value.video_url)
   window.open(url, '_blank')
 }
 </script>
