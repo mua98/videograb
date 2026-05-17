@@ -17,7 +17,15 @@ async def health():
 @router.post("/parse", response_model=ParseResponse)
 async def parse_video(request: ParseRequest):
     try:
-        url = request.url.strip()
+        raw_url = request.url.strip()
+
+        # 从分享文本中提取第一个 URL
+        import re
+        url_match = re.search(r'https?://[^\s<>"\']+', raw_url)
+        if url_match:
+            url = url_match.group(0).rstrip('/')
+        else:
+            url = raw_url.rstrip('/')
 
         # 检测平台
         if "douyin.com" in url:
